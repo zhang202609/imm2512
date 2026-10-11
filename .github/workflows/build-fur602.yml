@@ -1,0 +1,119 @@
+# ImmortalWrt 25.12 —— 荣耀 FUR-602（114M 分区 / bin 固件）
+#
+# 用法：
+#   1. 新建 GitHub 仓库，把整个 fur602-imm2512/ 目录内容放在仓库根目录
+#      （即仓库里要有 dts/mt7981b-honor-fur-602.dts 和 image/filogic.mk.fur602）
+#   2. Actions → Build ImmortalWrt 25.12 for Honor FUR-602 → Run workflow
+#   3. 约 40~80 分钟后，在 Artifacts 里下载固件
+#
+name: Build ImmortalWrt 25.12 for Honor FUR-602
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'dts/**'
+      - 'image/**'
+      - '.github/workflows/build-fur602.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 释放磁盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            python3-dev libelf-dev ecj fastjar java-propose-classpath \
+            qemu-utils ccache
+
+      - name: 准备 ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-fur602-${{ github.run_id }}
+          restore-keys: ccache-fur602-
+
+      - name: 克隆 ImmortalWrt 25.12
+        run: |
+          git clone -b openwrt-25.12 --depth 1 https://github.com/immortalwrt/immortalwrt immortalwrt
+          cd immortalwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 应用 FUR-602 移植文件
+        run: |
+          set -e
+          cd immortalwrt
+          test -f ../dts/mt7981b-honor-fur-602.dts || { echo "缺少 ../dts/mt7981b-honor-fur-602.dts"; exit 1; }
+          test -f ../image/filogic.mk.fur602     || { echo "缺少 ../image/filogic.mk.fur602"; exit 1; }
+          cp ../dts/mt7981b-honor-fur-602.dts target/linux/mediatek/dts/
+          cat ../image/filogic.mk.fur602 >> target/linux/mediatek/image/filogic.mk
+          grep -q "define Device/honor_fur-602" target/linux/mediatek/image/filogic.mk
+          echo "移植文件已就位"
+
+      - name: 生成 .config
+        run: |
+          cd immortalwrt
+          cat > .config <<'CFG_EOF'
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_honor_fur-602=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-app-opkg=y
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          CFG_EOF
+          make defconfig
+          grep -q "honor_fur-602" .config && echo "配置 OK"
+
+      - name: 下载依赖包
+        run: cd immortalwrt && make download -j16
+
+      - name: 编译
+        run: |
+          cd immortalwrt
+          echo "开始编译: $(date)"
+          make -j$(nproc) V=s 2>&1 | tee build.log | tail -n 2000
+          echo "结束编译: $(date)"
+
+      - name: 整理产物
+        run: |
+          cd immortalwrt/bin/targets/mediatek/filogic
+          ls -lh
+          sha256sum *fur-602*.bin *fur-602*.itb 2>/dev/null > sha256sums-fur602.txt || true
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-2512-honor-fur-602
+          path: |
+            immortalwrt/bin/targets/mediatek/filogic/*fur-602*.bin
+            immortalwrt/bin/targets/mediatek/filogic/*fur-602*.itb
+            immortalwrt/bin/targets/mediatek/filogic/sha256sums.txt
+            immortalwrt/bin/targets/mediatek/filogic/sha256sums-fur602.txt
+          if-no-files-found: error
+
+      - name: 上传编译日志（失败时排错用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: immortalwrt/build.log

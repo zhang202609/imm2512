@@ -1,0 +1,66 @@
+# ============================================================================
+# Honor FUR-602 —— 追加到
+#   target/linux/mediatek/image/filogic.mk
+# 末尾（TARGET_DEVICES 之前任意位置均可，建议放在 honor_* 字母序位置）
+#
+# 布局：hanwckf U-Boot expand(114m) —— ubi 0x580000 + 0x7200000 (114MiB)
+# 产物：xxx-mediatek-filogic-honor_fur-602-squashfs-factory.bin   (U-Boot 首次刷入)
+#       xxx-mediatek-filogic-honor_fur-602-squashfs-sysupgrade.bin (系统内升级)
+#       xxx-mediatek-filogic-honor_fur-602-initramfs-kernel.itb    (内存版试机)
+# ============================================================================
+
+define Device/honor_fur-602
+  DEVICE_VENDOR := Honor
+  DEVICE_MODEL := FUR-602
+  DEVICE_ALT0_VENDOR := Honor
+  DEVICE_ALT0_MODEL := XT50 / XU50 / XC50
+  DEVICE_DTS := mt7981b-honor-fur-602
+  DEVICE_DTS_DIR := ../dts
+  DEVICE_PACKAGES := kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware
+  UBINIZE_OPTS := -E 5
+  BLOCKSIZE := 128k
+  PAGESIZE := 2048
+  KERNEL_IN_UBI := 1
+  IMAGES += factory.bin
+  IMAGE_SIZE := 116736k
+  IMAGE/factory.bin := append-ubi | check-size $$$$(IMAGE_SIZE)
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+  SUPPORTED_DEVICES += honor,fur-602
+endef
+TARGET_DEVICES += honor_fur-602
+
+# ---------------------------------------------------------------------------
+# 变体 B：FIT / itb 格式（与 360T7 主线写法一致）
+# 若你想跟 360T7 一样用 sysupgrade.itb + UBI 内 ubootenv，改用下面这段，
+# 并在 DTS 的 chosen 里加：
+#     bootargs-append = " root=/dev/fit0 rootwait";
+#     rootdisk = <&ubi_rootdisk>;
+# 同时 ubi 分区内加：
+#     volumes { ubi_rootdisk: ubi-volume-fit { volname = "fit"; }; };
+# ---------------------------------------------------------------------------
+# define Device/honor_fur-602-itb
+#   DEVICE_VENDOR := Honor
+#   DEVICE_MODEL := FUR-602
+#   DEVICE_VARIANT := (FIT layout)
+#   DEVICE_DTS := mt7981b-honor-fur-602
+#   DEVICE_DTS_DIR := ../dts
+#   DEVICE_PACKAGES := kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware
+#   UBINIZE_OPTS := -E 5
+#   BLOCKSIZE := 128k
+#   PAGESIZE := 2048
+#   KERNEL_IN_UBI := 1
+#   UBOOTENV_IN_UBI := 1
+#   IMAGES := sysupgrade.itb
+#   KERNEL_INITRAMFS_SUFFIX := -recovery.itb
+#   KERNEL := kernel-bin | libdeflate-gzip
+#   KERNEL_INITRAMFS := kernel-bin | lzma | \
+# 	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd | \
+# 	pad-to 64k
+#   IMAGE/sysupgrade.itb := append-kernel | \
+# 	fit gzip $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb external-static-with-rootfs | \
+# 	append-metadata
+#   ARTIFACTS := preloader.bin bl31-uboot.fip
+#   ARTIFACT/preloader.bin := mt7981-bl2 spim-nand-ddr3
+#   ARTIFACT/bl31-uboot.fip := mt7981-bl31-uboot honor_fur-602
+# endef
+# TARGET_DEVICES += honor_fur-602-itb
